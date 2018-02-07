@@ -1,6 +1,8 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 11.00
-# Visual C++ Express 2010
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.27130.2010
+MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "log2ubx", "log2ubx.vcxproj", "{855BC1B5-DB8C-4D69-9AEA-A85194620608}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "log_CSV", "log_CSV.vcxproj", "{D5B410B6-719A-4ABC-ACE2-1304143B7A17}"
@@ -12,6 +14,8 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "test_matrix", "test\test_matrix.vcxproj", "{8D112965-118A-4A5F-8FE5-3B214D156636}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "test_INS_GPS_Factory", "test\test_INS_GPS_Factory.vcxproj", "{FFD71BA6-6B4B-4E71-88EA-2FB4ECBE59EE}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "test_SBAS", "test\test_SBAS.vcxproj", "{E85D9A51-DCEE-4932-8351-30702C865227}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -54,8 +58,17 @@ Global
 		{FFD71BA6-6B4B-4E71-88EA-2FB4ECBE59EE}.Debug|Win32.Build.0 = Debug|Win32
 		{FFD71BA6-6B4B-4E71-88EA-2FB4ECBE59EE}.Release|Win32.ActiveCfg = Release|Win32
 		{FFD71BA6-6B4B-4E71-88EA-2FB4ECBE59EE}.Release|Win32.Build.0 = Release|Win32
+		{E85D9A51-DCEE-4932-8351-30702C865227}.AppVeyor|Win32.ActiveCfg = AppVeyor|Win32
+		{E85D9A51-DCEE-4932-8351-30702C865227}.AppVeyor|Win32.Build.0 = AppVeyor|Win32
+		{E85D9A51-DCEE-4932-8351-30702C865227}.Debug|Win32.ActiveCfg = Debug|Win32
+		{E85D9A51-DCEE-4932-8351-30702C865227}.Debug|Win32.Build.0 = Debug|Win32
+		{E85D9A51-DCEE-4932-8351-30702C865227}.Release|Win32.ActiveCfg = Release|Win32
+		{E85D9A51-DCEE-4932-8351-30702C865227}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {1BC4291C-AB65-49CF-93B7-A805D4CFE391}
 	EndGlobalSection
 EndGlobal
