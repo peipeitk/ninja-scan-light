@@ -46,12 +46,14 @@
 
 #include "param/matrix.h"
 #include "GPS.h"
+#include "SBAS.h"
 #include "NTCM.h"
 
 template <class FloatT>
 struct GPS_SinglePositioning_Options {
   enum ionospheric_models_t {
     IONOSPHERIC_KLOBUCHAR,
+    IONOSPHERIC_SBAS,
     IONOSPHERIC_NTCM_GL,
     IONOSPHERIC_NONE,
     IONOSPHERIC_MODELS,
@@ -59,11 +61,13 @@ struct GPS_SinglePositioning_Options {
   bool ionospheric_models[IONOSPHERIC_MODELS];
 
   FloatT f_10_7;
+  SBAS_SpaceNode<FloatT> *sbas_space_node;
 
   GPS_SinglePositioning_Options()
-      : f_10_7(-1) {
+      : f_10_7(-1), sbas_space_node(NULL) {
     // default: broadcasted Klobuchar parameters are at least required for solution.
     ionospheric_models[IONOSPHERIC_KLOBUCHAR] = true;
+    ionospheric_models[IONOSPHERIC_SBAS] = true;
     ionospheric_models[IONOSPHERIC_NTCM_GL] = false;
     ionospheric_models[IONOSPHERIC_NONE] = false;
   }
@@ -103,7 +107,8 @@ class GPS_SinglePositioning {
     const options_t &options() const {return _options;}
 
     typename options_t::ionospheric_models_t ionospheric_model_preferred() const {
-      // both priority and availability check
+      // check both priority and availability
+      // TODO SBAS
       if(_options.ionospheric_models[options_t::IONOSPHERIC_KLOBUCHAR]
           && _space_node.is_valid_iono_utc()){
         return options_t::IONOSPHERIC_KLOBUCHAR;

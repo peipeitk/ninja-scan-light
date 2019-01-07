@@ -180,6 +180,7 @@ struct QuaternionData_TypeMapper<float_sylph_t> {
 #include "navigation/INS_GPS_Debug.h"
 #include "navigation/GPS.h"
 #include "navigation/GPS_Solver.h"
+#include "navigation/SBAS.h"
 #include "navigation/RINEX.h"
 
 #include "navigation/MagneticField.h"
@@ -1804,6 +1805,8 @@ class StreamProcessor
       // for tightly coupled
       typedef GPS_SpaceNode<float_sylph_t> gps_space_node_t;
       gps_space_node_t gps_space_node;
+      typedef SBAS_SpaceNode<float_sylph_t> sbas_space_node_t;
+      sbas_space_node_t sbas_space_node;
       G_Packet_Measurement packet_raw_latest;
       typedef G_Packet_Measurement::raw_data_t raw_data_t;
       raw_data_t::solver_t::options_t solver_options;
@@ -1813,7 +1816,9 @@ class StreamProcessor
         raw_data_t::solver_t solver;
         void associate() {
           handler.packet_raw_latest.raw_data.solver = &solver;
+          //handler.solver_options.sbas_space_node = &(handler.sbas_space_node); // TODO activate SBAS correction
           handler.loader.gps = &(handler.gps_space_node);
+          handler.loader.sbas = &(handler.sbas_space_node);
         }
         tightly_associator_t(GHandler &h)
             : handler(h),
@@ -1833,7 +1838,7 @@ class StreamProcessor
           packet_latest(),
           itow_ms_0x0102(-1), itow_ms_0x0112(-1),
           week_number(Options::gps_time_t::WN_INVALID), status(),
-          gps_space_node(),
+          gps_space_node(), sbas_space_node(),
           packet_raw_latest(), solver_options(),
           loader(),
           tightly_associator(*this) {
