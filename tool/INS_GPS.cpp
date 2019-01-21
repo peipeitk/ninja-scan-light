@@ -179,6 +179,9 @@ QUATERNION_NO_FLY_WEIGHT(float_sylph_t);
 
 #include "analyze_common.h"
 
+/*-----------データレートを設定---------*/
+#define datarate 2
+
 struct Options : public GlobalOptions<float_sylph_t> {
   typedef GlobalOptions<float_sylph_t> super_t;
 
@@ -187,6 +190,12 @@ struct Options : public GlobalOptions<float_sylph_t> {
   bool dump_correct; ///< True for dumping states at measurement updates
   bool dump_stddev; ///< True for dumping standard deviations
   bool out_is_N_packet; ///< True for NPacket formatted outputs
+
+  /*-----------------datarateの設定--------------*/
+private:
+	int datacount = 0;
+public:
+	int datacount_add() { return ++datacount; }
 
   // Time Stamp
   struct time_stamp_t {
@@ -289,7 +298,7 @@ struct Options : public GlobalOptions<float_sylph_t> {
 
   Options()
       : super_t(),
-      dump_update(true), dump_correct(false), dump_stddev(false),
+      dump_update(true), dump_correct(false), dump_stddev(true),
       out_is_N_packet(false),
       time_stamp(),
       ins_gps_integration(INS_GPS_INTEGRATION_LOOSELY), ins_gps_sync_strategy(INS_GPS_SYNC_OFFLINE),
@@ -494,20 +503,20 @@ class NAV : public Updatable {
     virtual float_sylph_t &operator[](const unsigned &index) = 0;
 
     template <class Container>
-    static typename Container::const_iterator nearest(
-        const Container &packets_time_series, const float_sylph_t &itow,
-        const unsigned int &group_size = 1){
-      typename Container::const_iterator
-          it_head(packets_time_series.begin()),
-          it_eval(it_head + (group_size / 2)),
-          it_end(packets_time_series.end());
-      for(int i(distance(it_head, it_end));
-          i > group_size;
-          i--, it_head++, it_eval++){
-        if(it_eval->itow >= itow){break;}
-      }
-      return it_head;
-    }
+	static typename Container::const_iterator nearest(
+		const Container &packets_time_series, const float_sylph_t &itow,
+		const unsigned int &group_size = 1) {
+		typename Container::const_iterator
+			it_head(packets_time_series.begin()),
+			it_eval(it_head + (group_size / 2)),
+			it_end(packets_time_series.end());
+		for (int i(distance(it_head, it_end));
+			i > group_size;
+			i--, it_head++, it_eval++) {
+			if (it_eval->itow >= itow) { break; }
+		}
+		return it_head;
+	}
 
     /**
      * Estimate yaw correction angle by using magnetic sensor values
@@ -586,11 +595,13 @@ struct NAV_Factory {
 
   struct NAVDisplay : public BaseNAV {
     NAVDisplay() : BaseNAV() {}
+
     void label(std::ostream &out = std::cout) const {
       if(options.out_is_N_packet){return;}
       BaseNAV::label(options.out());
       options.out() << std::endl;
     }
+
     void updated() const {
       const NAV::updated_items_t &items(BaseNAV::updated_items());
       if(items.empty()){return;}
@@ -602,9 +613,14 @@ struct NAV_Factory {
           (*it)->encode_N0(buf);
           options.out().write(buf, sizeof(buf));
           return;
-        }else{
-          options.out() << (**it) << std::endl;
         }
+		/*-----------------------datarate回ごとに出力---------------------*/
+		else if (options.datacount_add() % datarate == 0){
+			options.out() << (**it) << std::endl;
+        }
+		else {
+			return;
+		}
       }
 
       options.out_debug() << (**(items.rbegin())).time_stamp() << ',';
@@ -877,7 +893,7 @@ class INS_GPS_NAV : public NAV {
     class Helper;
   protected:
     ins_gps_t *ins_gps;
-    Helper helper;
+	Helper helper;
 
     void setup_filter(void *){}
 
@@ -1184,6 +1200,12 @@ class INS_GPS_NAV : public NAV {
       }
     }
 
+	/*----------------set_satellite_countの定義---------------*/
+	template <class GPS_Packet>
+	int set_sats_count(const GPS_Packet &gps) {
+		return ins_gps->set_sats_count(gps);
+	}
+
     NAV &correct_yaw(const float_t &delta_yaw){
       ins_gps->correct_yaw(delta_yaw, pow(deg2rad(options.mag_heading_accuracy_deg), 2));
       return *this;
@@ -1208,6 +1230,8 @@ class INS_GPS_NAV : public NAV {
     void update(const G_Packet_Raw &packet){
       helper.before_any_update();
       helper.measurement_update(packet);
+	  /*---------------衛星数カウント関数-----------------*/
+	  helper.sats_count(packet);
     }
     void update(const M_Packet &packet){
       helper.before_any_update();
@@ -1295,6 +1319,9 @@ class INS_NAVData : public PureINS, public NAVData<typename PureINS::float_t> {
   protected:
     mutable const char *mode;
     mutable time_stamp_t itow;
+	/*----------------出力するときの衛星数satscountを定義--------------*/
+	int satscount = 0;
+
   public:
     INS_NAVData() : PureINS(), mode("N/A"), itow(0) {}
     INS_NAVData(const INS_NAVData<PureINS, time_stamp_t> &orig, const bool &deepcopy = false)
@@ -1323,6 +1350,12 @@ typename PureINS::float_t fname() const {return PureINS::fname();}
       mode = _mode;
       itow = _itow;
     }
+
+	/*-------------------出力用に利用可能衛星数をセット------------------*/
+	void set_satscount(int _satscount) {
+		satscount = _satscount;
+	}
+
   protected:
     static void label_time(std::ostream &out, const void *){
       out << "itow";
@@ -1336,13 +1369,17 @@ typename PureINS::float_t fname() const {return PureINS::fname();}
     void label(std::ostream &out) const {
       out << "mode" << ',';
       label_time(out, &itow);
-      out << ',';
+      out << ','
+		  /*----------------------------衛星数のラベル------------------------*/
+		  << "sats_count" << ',';
       super_data_t::label(out);
     }
     void dump(std::ostream &out) const {
-      out << mode << ','
-          << itow << ',';
-      super_data_t::dump(out);
+		out << mode << ','
+			<< itow << ','
+			/*-----------------------衛星数を出力--------------------------*/
+			<< satscount << ',';
+				super_data_t::dump(out);
     }
 };
 
@@ -1513,8 +1550,8 @@ class INS_GPS_NAVData : public INS_GPS {
      * @param itow current time
      */
     void dump(std::ostream &out) const {
-      INS_GPS::dump(out);
-      dump2(out, this);
+		INS_GPS::dump(out);
+		dump2(out, this);
     }
 };
 
@@ -2574,6 +2611,10 @@ processors_t processors;
 
 template <class INS_GPS>
 class INS_GPS_NAV<INS_GPS>::Helper {
+
+	/*--------------衛星数をカウント------------*/
+	int satellites_count = 0;
+
   protected:
     enum {
       UNINITIALIZED,
@@ -2897,6 +2938,12 @@ class INS_GPS_NAV<INS_GPS>::Helper {
       nav.ins_gps->set_header("MU");
     }
 
+	/*----------sats_count_original定義-----------*/
+	template <class GPS_Packet>
+	int sats_count_original(const GPS_Packet &g_packet) {
+		return nav.set_sats_count(g_packet);
+	}
+
   public:
     /**
      * Perform measurement update by using position and velocity obtained with GPS receiver.
@@ -2936,6 +2983,17 @@ class INS_GPS_NAV<INS_GPS>::Helper {
       return;
     }
 
+	/*----------------様々な引数に対応できるsats_countを用意-----------*/
+	template <typename BaseFINS>
+	void sats_count(const G_Packet &g_packet,
+		INS_GPS2_Tightly<BaseFINS> *) {
+		return;
+	}
+
+	void sats_count(const G_Packet_Raw &g_packet, void *) {
+		return;
+	}
+
     /**
      * Perform measurement update by using raw measurement obtained with GPS receiver.
      *
@@ -2971,11 +3029,25 @@ class INS_GPS_NAV<INS_GPS>::Helper {
         time_update_after_initialization(g_packet);
       }
     }
+
+	/*----------------sats_countの定義-------------*/
+	template <typename BaseFINS>
+	void sats_count(const G_Packet_Raw &g_packet,
+		INS_GPS2_Tightly<BaseFINS> *ins_gps) {
+		satellites_count = sats_count_original(g_packet);
+		nav.ins_gps->set_satscount(satellites_count);
+	}
+
   public:
     template <class GPS_Packet>
     void measurement_update(const GPS_Packet &g_packet){
       measurement_update(g_packet, nav.ins_gps);
     }
+	/*--------sats_countの定義-----------*/
+	template <class GPS_Packet>
+	void sats_count(const GPS_Packet &g_packet){
+		sats_count(g_packet, nav.ins_gps);
+	}
 };
 
 class NAV_Generator {
@@ -3082,7 +3154,7 @@ virtual void update(const type &packet){ \
   while(proc.process_1page());
 }
 
-int main(int argc, char *argv[]){
+int main(int argc, char *argv[]){                                        //INS_GPS.exe --tightly --calib_file=F3_cal.txt 160210_F3.dat > (任意の名前).csv
   
   cout << setprecision(10);
   cerr << setprecision(10);
