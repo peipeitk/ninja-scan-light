@@ -448,6 +448,11 @@ class INS_GPS2_Tightly : public BaseFINS{
             pos, clock_error,
             residual);
 
+		/*----------------------------------------------------------------------------------------
+		 * mask angle以下の衛星を利用しない
+		 *----------------------------------------------------------------------------------------*/
+		 if (!gps.solver->mask_angle(sat, range, time_arrival, pos, clock_error, residual)) { continue; }
+
         { // setup H matrix
 #define pow2(x) ((x) * (x))
 #define q_e2n(i) BaseFINS::q_e2n.get(i)
@@ -546,6 +551,83 @@ class INS_GPS2_Tightly : public BaseFINS{
       return CorrectInfo<float_t>(H, z, R);
     }
 
+	/*-------------satellites_count_maskの定義-------------*/
+	int sats_count_mask(const raw_data_t &gps,
+		const float_t &clock_error, const float_t &clock_error_rate) const {
+
+		// check space_node is configured
+		/*---------------return 0に注意-------------------*/
+		if (!gps.solver) { 
+			return 0;
+		}
+
+		float_t z_serialized[64]; // maximum 64 observation values
+#define z_size (sizeof(z_serialized) / sizeof(z_serialized[0]))
+		float_t H_serialized[z_size][P_SIZE] = { {0} };
+		float_t R_diag[z_size] = { 0 };
+#undef z_size
+
+		typedef typename raw_data_t::measurement_t::const_iterator it_t;
+		typedef typename raw_data_t::measurement_t::mapped_type::const_iterator it2_t;
+		typedef typename raw_data_t::space_node_t::satellites_t::const_iterator it_sat_t;
+
+		typename raw_data_t::gps_time_t time_arrival(
+			gps.gpstime - clock_error / space_node_t::light_speed);
+
+		typename solver_t::pos_t pos = {
+		  BaseFINS::template position_xyz<typename solver_t::xyz_t>(),
+		  typename solver_t::llh_t(BaseFINS::phi, BaseFINS::lambda, BaseFINS::h),
+		};
+		typename solver_t::xyz_t vel_xyz(BaseFINS::template velocity_xyz<typename solver_t::xyz_t>());
+
+		const space_node_t &space_node(gps.solver->space_node());
+
+		it_t it_range(gps.measurement.find(raw_data_t::L1_PSEUDORANGE));
+		/*-----------------------------------------return 0に注意-----------------------------------------*/
+		if (it_range == gps.measurement.end()) { 
+			return 0; 
+		}
+
+		it_t it_rate(gps.measurement.find(raw_data_t::L1_RANGE_RATE));
+
+		// count up valid measurement, and make observation matrices
+		int z_index(0);
+
+		/*-------------------衛星数をカウントする--------------------*/
+		int sats_available = 0;
+
+		for (it2_t it2_range(it_range->second.begin()); it2_range != it_range->second.end(); ++it2_range) {
+			int prn(it2_range->first);
+			it_sat_t it_sat(space_node.satellites().find(prn));
+			if (it_sat == space_node.satellites().end()) { continue; } // registered satellite?
+
+			const typename solver_t::satellite_t &sat(it_sat->second);
+			if (!sat.ephemeris().is_valid(gps.gpstime)) { continue; } // has valid ephemeris?
+
+			// range residual
+			float_t los_neg[3], weight;
+			typename solver_t::residual_t residual = {
+			  z_serialized[z_index],
+			  los_neg[0], los_neg[1], los_neg[2],
+			  weight,
+			};
+
+			float_t range(it2_range->second);
+			range = gps.solver->range_residual(
+				sat, range, time_arrival,
+				pos, clock_error,
+				residual);
+
+			/*--------------------mask angleを超えているかチェック--------------*/
+			if (!gps.solver->mask_angle(sat, range, time_arrival,
+				pos, clock_error,
+				residual)) { continue; }
+
+			++sats_available;
+		}
+		return sats_available;
+	}
+
     CorrectInfo<float_t> correct_info(
         const raw_data_t &gps,
         const vec3_t &lever_arm_b, const vec3_t &omega_b2i_4b,
@@ -569,6 +651,17 @@ class INS_GPS2_Tightly : public BaseFINS{
           BaseFINS::m_clock_error[gps.clock_index],
           BaseFINS::m_clock_error_rate[gps.clock_index]);
     }
+
+	/*--------------satellites_count_maskの引数にclock誤差を持ってくる---------------*/
+	int sats_count_mask(const raw_data_t &gps) const {
+		/*-------------return 0は検討の余地あり--------------*/
+		if (gps.clock_index >= CLOCKS_SUPPORTED) {
+			return 0; 
+		}  
+		return sats_count_mask(gps,
+			BaseFINS::m_clock_error[gps.clock_index],
+			BaseFINS::m_clock_error_rate[gps.clock_index]);
+	}
 
   protected:
     float_t range_residual_mean_ms(
@@ -652,6 +745,11 @@ class INS_GPS2_Tightly : public BaseFINS{
     void correct(const raw_data_t &gps){
       correct_generic(gps, CorrectInfoGenerator1());
     }
+
+	/*-----------set_satellites_countの定義------------*/
+	int set_sats_count(const raw_data_t &gps) {
+		return sats_count_mask(gps);
+	}
 
     /**
      * Measurement update with GPS raw measurement and lever arm effect
