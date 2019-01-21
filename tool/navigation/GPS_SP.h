@@ -157,106 +157,177 @@ class GPS_SinglePositioning {
       typename options_t::ionospheric_models_t ionospheric_model; ///< applied ionospheric model
     };
 
-    /**
-     * Get range residual in accordance with current status
-     *
-     * @param sat satellite
-     * @param range pseudo-range
-     * @param time_arrival time when signal arrive at receiver
-     * @param usr_pos (temporal solution of) user position in meters
-     * @param usr_pos_llh (temporal solution of) user position in latitude, longitude, and altitude format
-     * @param receiver_error (temporal solution of) receiver clock error in meters
-     * @param mat matrices to be stored, already initialized with appropriate size
-     * @param calc_opt range residual calculation options represented by applied ionospheric model
-     * @param is_coarse_mode if true, precise correction will be skipped.
-     * @return (float_t) pseudo range, which includes delay, and exclude receiver/satellite error.
-     */
-    float_t range_residual(
-        const satellite_t &sat,
-        const float_t &range,
-        const gps_time_t &time_arrival,
-        const pos_t &usr_pos,
-        const float_t &receiver_error,
-        residual_t &residual,
-        const range_residual_options_t &calc_opt,
-        const bool &is_coarse_mode = false) const {
+	/**
+	 * Get range residual in accordance with current status
+	 *
+	 * @param sat satellite
+	 * @param range pseudo-range
+	 * @param time_arrival time when signal arrive at receiver
+	 * @param usr_pos (temporal solution of) user position in meters
+	 * @param usr_pos_llh (temporal solution of) user position in latitude, longitude, and altitude format
+	 * @param receiver_error (temporal solution of) receiver clock error in meters
+	 * @param mat matrices to be stored, already initialized with appropriate size
+	 * @param calc_opt range residual calculation options represented by applied ionospheric model
+	 * @param is_coarse_mode if true, precise correction will be skipped.
+	 * @return (float_t) pseudo range, which includes delay, and exclude receiver/satellite error.
+	 */
+	float_t range_residual(
+		const satellite_t &sat,
+		const float_t &range,
+		const gps_time_t &time_arrival,
+		const pos_t &usr_pos,
+		const float_t &receiver_error,
+		residual_t &residual,
+		const range_residual_options_t &calc_opt,
+		const bool &is_coarse_mode = false) const {
 
-      // Temporal geometry range
-      float_t pseudo_range(range - receiver_error);
+		// Temporal geometry range
+		float_t pseudo_range(range - receiver_error);
 
-      // Clock error correction
-      pseudo_range += sat.clock_error(time_arrival, pseudo_range) * space_node_t::light_speed;
+		// Clock error correction
+		pseudo_range += sat.clock_error(time_arrival, pseudo_range) * space_node_t::light_speed;
 
-      // Calculate satellite position
-      xyz_t sat_pos(sat.position(time_arrival, pseudo_range));
-      float_t geometric_range(usr_pos.xyz.dist(sat_pos));
+		// Calculate satellite position
+		xyz_t sat_pos(sat.position(time_arrival, pseudo_range));
+		float_t geometric_range(usr_pos.xyz.dist(sat_pos));
 
-      // Calculate residual
-      residual.residual = pseudo_range - geometric_range;
+		// Calculate residual
+		residual.residual = pseudo_range - geometric_range;
 
-      // Setup design matrix
-      residual.los_neg_x = -(sat_pos.x() - usr_pos.xyz.x()) / geometric_range;
-      residual.los_neg_y = -(sat_pos.y() - usr_pos.xyz.y()) / geometric_range;
-      residual.los_neg_z = -(sat_pos.z() - usr_pos.xyz.z()) / geometric_range;
+		// Setup design matrix
+		residual.los_neg_x = -(sat_pos.x() - usr_pos.xyz.x()) / geometric_range;
+		residual.los_neg_y = -(sat_pos.y() - usr_pos.xyz.y()) / geometric_range;
+		residual.los_neg_z = -(sat_pos.z() - usr_pos.xyz.z()) / geometric_range;
 
-      if(is_coarse_mode){
+		if (is_coarse_mode) {
 
-        residual.weight = 1;
-      }else{ // Perform more correction
+			residual.weight = 1;
+		}
+		else { // Perform more correction
 
-        enu_t relative_pos(enu_t::relative(sat_pos, usr_pos.xyz));
+			enu_t relative_pos(enu_t::relative(sat_pos, usr_pos.xyz));
 
-        // Ionospheric
-        switch(calc_opt.ionospheric_model){
-          case options_t::IONOSPHERIC_KLOBUCHAR:
-            residual.residual += _space_node.iono_correction(relative_pos, usr_pos.llh, time_arrival);
-            break;
-          case options_t::IONOSPHERIC_NTCM_GL:
-            // TODO f_10_7 setup, optimization (mag_model etc.)
-            typename space_node_t::pierce_point_res_t pp(_space_node.pierce_point(relative_pos, usr_pos.llh));
-            residual.residual -= space_node_t::tec2delay(
-                _space_node.slant_factor(relative_pos)
-                * NTCM_GL_Generic<float_t>::tec_vert(
-                    pp.latitude, pp.longitude,
-                    time_arrival.year(), _options.f_10_7));
-            break;
-        }
+			// Ionospheric
+			switch (calc_opt.ionospheric_model) {
+			case options_t::IONOSPHERIC_KLOBUCHAR:
+				residual.residual += _space_node.iono_correction(relative_pos, usr_pos.llh, time_arrival);
+				break;
+			case options_t::IONOSPHERIC_NTCM_GL:
+				// TODO f_10_7 setup, optimization (mag_model etc.)
+				typename space_node_t::pierce_point_res_t pp(_space_node.pierce_point(relative_pos, usr_pos.llh));
+				residual.residual -= space_node_t::tec2delay(
+					_space_node.slant_factor(relative_pos)
+					* NTCM_GL_Generic<float_t>::tec_vert(
+						pp.latitude, pp.longitude,
+						time_arrival.year(), _options.f_10_7));
+				break;
+			}
 
-        // Tropospheric
-        residual.residual += _space_node.tropo_correction(relative_pos, usr_pos.llh);
+			// Tropospheric
+			residual.residual += _space_node.tropo_correction(relative_pos, usr_pos.llh);
 
-        // Setup weight
-        if(std::abs(residual.residual) > 30.0){
-          // If residual is too big, exclude it by decreasing its weight.
-          residual.weight = 1E-8;
-        }else{
-          // elevation weight based on "GPS実用プログラミング"
-          residual.weight = std::pow(sin(relative_pos.elevation())/0.8, 2);
-          if(residual.weight < 1E-3){residual.weight = 1E-3;}
-        }
-      }
+			// Setup weight
+			if (std::abs(residual.residual) > 30.0) {
+				// If residual is too big, exclude it by decreasing its weight.
+				residual.weight = 1E-8;
+			}
+			else {
+				// elevation weight based on "GPS実用プログラミング"
+				residual.weight = std::pow(sin(relative_pos.elevation()) / 0.8, 2);
+				if (residual.weight < 1E-3) { residual.weight = 1E-3; }
+			}
+		}
 
-      return pseudo_range;
-    }
+		return pseudo_range;
+	}
 
-    float_t range_residual(
-        const satellite_t &sat,
-        const float_t &range,
-        const gps_time_t &time_arrival,
-        const pos_t &usr_pos,
-        const float_t &receiver_error,
-        residual_t &residual,
-        const bool &is_coarse_mode = false) const {
-      range_residual_options_t calc_opt = {
-        ionospheric_model_preferred(),
-      };
-      return range_residual(
-          sat, range, time_arrival,
-          usr_pos, receiver_error,
-          residual,
-          calc_opt,
-          is_coarse_mode);
-    }
+	float_t range_residual(
+		const satellite_t &sat,
+		const float_t &range,
+		const gps_time_t &time_arrival,
+		const pos_t &usr_pos,
+		const float_t &receiver_error,
+		residual_t &residual,
+		const bool &is_coarse_mode = false) const {
+		range_residual_options_t calc_opt = {
+		  ionospheric_model_preferred(),
+		};
+		return range_residual(
+			sat, range, time_arrival,
+			usr_pos, receiver_error,
+			residual,
+			calc_opt,
+			is_coarse_mode);
+	}
+
+	/**
+	 * mask angle より仰角が大きいなら、true そうでないなら、false
+	 *
+	 * @param sat satellite
+	 * @param range pseudo-range
+	 * @param time_arrival time when signal arrive at receiver
+	 * @param usr_pos (temporal solution of) user position in meters
+	 * @param usr_pos_llh (temporal solution of) user position in latitude, longitude, and altitude format
+	 * @param receiver_error (temporal solution of) receiver clock error in meters
+	 * @param mat matrices to be stored, already initialized with appropriate size
+	 * @param calc_opt range residual calculation options represented by applied ionospheric model
+	 * @param is_coarse_mode if true, precise correction will be skipped.
+	 * @return (float_t) pseudo range, which includes delay, and exclude receiver/satellite error.
+	 */
+	bool mask_angle(
+		const satellite_t &sat,
+		const float_t &range,
+		const gps_time_t &time_arrival,
+		const pos_t &usr_pos,
+		const float_t &receiver_error,
+		residual_t &residual,
+		const range_residual_options_t &calc_opt,
+		const bool &is_coarse_mode = false) const {
+
+		/*--------------------------------------------------------------
+		 * maskを設定[deg]
+		 * 整数で表記するとint型になるので注意! 必ず小数点まで記入
+		 *--------------------------------------------------------------*/
+#define mask_d 15.0
+		double mask_r = deg2rad(mask_d);
+#undef mask_d
+
+		// Temporal geometry range
+		float_t pseudo_range(range - receiver_error);
+
+		// Clock error correction
+		pseudo_range += sat.clock_error(time_arrival, pseudo_range) * space_node_t::light_speed;
+
+		// Calculate satellite position
+		xyz_t sat_pos(sat.position(time_arrival, pseudo_range));
+		float_t geometric_range(usr_pos.xyz.dist(sat_pos));
+
+		enu_t relative_pos(enu_t::relative(sat_pos, usr_pos.xyz));
+
+		/*-------------------衛星の仰角がmask以上かチェック----------------*/
+		if (relative_pos.elevation() > mask_r) { return true; }
+		else return false;
+	}
+
+	bool mask_angle(
+		const satellite_t &sat,
+		const float_t &range,
+		const gps_time_t &time_arrival,
+		const pos_t &usr_pos,
+		const float_t &receiver_error,
+		residual_t &residual,
+		const bool &is_coarse_mode = false) const {
+		range_residual_options_t calc_opt = {
+		  ionospheric_model_preferred(),
+		};
+		return mask_angle(
+			sat, range, time_arrival,
+			usr_pos, receiver_error,
+			residual,
+			calc_opt,
+			is_coarse_mode);
+	}
+
 
     struct user_pvt_t {
       enum {
